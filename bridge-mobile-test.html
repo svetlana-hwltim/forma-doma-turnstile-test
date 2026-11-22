@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6cOoXHUY91p5dlJ8tWJlD2r6aLEaHW8cN8hroB6F5aQ=' https://challenges.cloudflare.com; style-src 'sha256-Dt/NyjGUr2Dq3QHo5Q+UAcCz7H/NTzVPKelMPHNjrm8='; frame-src https://challenges.cloudflare.com; connect-src https://challenges.cloudflare.com https://d5d62f2t9for9lf4du9l.3zvepvee.apigw.yandexcloud.net; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Тест заявки с Android</title>
+  <style>
+    body { margin: 0; background: #f2f5f3; color: #192c25; font: 1rem/1.5 system-ui, sans-serif; }
+    main { max-width: 36rem; margin: 1.5rem auto; padding: 1rem; }
+    section { background: white; border: 1px solid #d3dfd7; border-radius: 0.75rem; padding: 1rem; margin: 1rem 0; }
+    h1 { font-size: 1.6rem; margin: 0 0 0.5rem; }
+    h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+    p { margin: 0 0 0.7rem; }
+    dt { font-weight: 650; }
+    dd { margin: 0 0 0.75rem; overflow-wrap: anywhere; }
+    button { border: 0; border-radius: 0.5rem; background: #174c38; color: white; font: inherit; padding: 0.7rem 1rem; min-height: 44px; }
+    button:disabled { background: #e4ebe6; color: #52645b; }
+    #widget { max-width: 28rem; margin: 0.75rem 0; }
+  </style>
+</head>
+<body>
+  <main data-sitekey="0x4AAAAAAGNicAQwxbNvrtSj">
+    <h1>Тест заявки с Android</h1>
+    <p>Откройте страницу без VPN. После Turnstile потребуется отдельное нажатие для отправки.</p>
+    <section>
+      <h2>Что будет отправлено</h2>
+      <p>Учебная заявка: кухня «Олива», 100 × 100 см, базовый материал, с установкой. Имя и телефон вымышленные.</p>
+      <button id="prepare" type="button" disabled>Подготовить проверку</button>
+      <div id="widget"></div>
+      <button id="send" type="button" disabled>Отправить одну тестовую заявку</button>
+    </section>
+    <section>
+      <h2>Ход проверки</h2>
+      <dl role="status" aria-live="polite" aria-atomic="false">
+        <dt>Подготовка формы</dt><dd id="get-status">Не начата</dd>
+        <dt>Turnstile</dt><dd id="turnstile-status">Ожидание подготовки формы</dd>
+        <dt>Отправка</dt><dd id="post-status">Не начата</dd>
+        <dt>Сообщение</dt><dd id="notice-status">Проверка доступна только на тестовой странице.</dd>
+      </dl>
+    </section>
+    <noscript>Для проверки требуется JavaScript.</noscript>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+
+      const endpoint = 'https://d5d62f2t9for9lf4du9l.3zvepvee.apigw.yandexcloud.net/api/application';
+      const pageOrigin = 'https://svetlana-hwltim.github.io';
+      const pagePath = '/forma-doma-turnstile-test/bridge-mobile-test.html';
+      const attemptKey = 'forma-doma-turnstile-test:bridge-mobile-test:attempt-v1';
+      const testSitekey = document.querySelector('main').dataset.sitekey;
+      const prepare = document.getElementById('prepare');
+      const send = document.getElementById('send');
+      const widget = document.getElementById('widget');
+      const status = (stage, text) => { document.getElementById(stage + '-status').textContent = text; };
+
+      if (location.origin !== pageOrigin || location.pathname !== pagePath) {
+        status('notice', 'Откройте страницу в тестовом репозитории forma-doma-turnstile-test.');
+        return;
+      }
+      if (!/^[A-Za-z0-9_-]{10,100}$/.test(testSitekey) || testSitekey === '__PUBLIC_TEST' + '_SITEKEY__') {
+        status('notice', 'При публикации укажите публичный Site Key тестового виджета.');
+        return;
+      }
+      if (!navigator.locks || !crypto.randomUUID) {
+        status('notice', 'Для защиты от повторов откройте страницу в актуальном Chrome на Android.');
+        return;
+      }
+      try {
+        if (localStorage.getItem(attemptKey)) {
+          status('post', 'Попытка уже выполнена или её результат неизвестен');
+          status('notice', 'Проверьте тестовый чат и D1 перед новой попыткой.');
+          return;
+        }
+      } catch {
+        status('notice', 'Доступ к хранилищу браузера нужен для защиты от повтора.');
+        return;
+      }
+
+      let csrf = null;
+      let token = null;
+      let widgetTimer;
+      let sending = false;
+      let attempted = false;
+      prepare.disabled = false;
+      status('notice', 'Нажмите «Подготовить проверку».');
+
+      const workerErrors = {
+        invalid_csrf: 'Подтверждение формы отклонено.',
+        challenge_failed: 'Сервер отклонил проверку Turnstile.',
+        challenge_unavailable: 'Серверная проверка Turnstile недоступна.',
+        invalid_request: 'Сервер отклонил формат учебной заявки.',
+        invalid_model: 'Сервер отклонил модель.',
+        submission_conflict: 'Этот идентификатор уже связан с другими данными.',
+        rate_limited: 'Превышен лимит тестовых заявок.',
+        pending: 'Доставка ещё не подтверждена.',
+        uncertain: 'Результат доставки неизвестен. Проверьте тестовый чат и D1.',
+        telegram_rejected: 'Тестовый Telegram отклонил отправку.',
+        unavailable: 'Тестовый сервис временно недоступен.',
+      };
+
+      async function api(stage, options, timeout) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeout);
+        try {
+          const response = await fetch(endpoint, {
+            ...options, credentials: 'omit', cache: 'no-store', redirect: 'error',
+            signal: controller.signal,
+          });
+          status(stage, 'HTTP ' + response.status);
+          let data = null;
+          try { data = await response.json(); } catch {}
+          return { response, data };
+        } catch {
+          status(stage, controller.signal.aborted ? 'Время ожидания истекло' : 'Сеть или CORS недоступны');
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function challengeFailure(message) {
+        clearTimeout(widgetTimer);
+        token = null;
+        send.disabled = true;
+        if (!attempted) {
+          status('turnstile', message);
+          status('notice', 'Обновите страницу, чтобы начать подготовку заново.');
+        }
+      }
+
+      function loadChallenge() {
+        status('turnstile', 'Загрузка скрипта');
+        const script = document.createElement('script');
+        widgetTimer = setTimeout(() => challengeFailure('Скрипт не загрузился вовремя'), 20000);
+        script.addEventListener('error', () => challengeFailure('Ошибка загрузки скрипта'));
+        window.onBridgeMobileTurnstileReady = () => {
+          clearTimeout(widgetTimer);
+          status('turnstile', 'Скрипт загружен. Ожидание виджета');
+          try {
+            widgetTimer = setTimeout(() => challengeFailure('Проверка не завершилась вовремя'), 120000);
+            window.turnstile.render(widget, {
+              sitekey: testSitekey,
+              action: 'application',
+              size: 'flexible',
+              appearance: 'always',
+              retry: 'never',
+              'refresh-expired': 'never',
+              'refresh-timeout': 'never',
+              'response-field': false,
+              callback(value) {
+                if (attempted || typeof value !== 'string' || !value || value.length > 2048) return;
+                clearTimeout(widgetTimer);
+                token = value;
+                status('turnstile', 'Проверка пройдена');
+                status('notice', 'Можно отправить одну учебную заявку.');
+                send.disabled = false;
+              },
+              'before-interactive-callback'() { status('turnstile', 'Выполните задание в виджете'); },
+              'error-callback'(code) {
+                const safe = typeof code === 'string' && /^\d{6}$/.test(code) ? ' ' + code : '';
+                challengeFailure('Ошибка Turnstile' + safe);
+              },
+              'expired-callback'() { challengeFailure('Срок проверки истёк'); },
+              'timeout-callback'() { challengeFailure('Время на выполнение задания истекло'); },
+              'unsupported-callback'() { challengeFailure('Браузер не поддерживается'); },
+            });
+          } catch {
+            challengeFailure('Не удалось создать виджет');
+          }
+        };
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onBridgeMobileTurnstileReady';
+        script.async = true;
+        document.head.append(script);
+      }
+
+      prepare.addEventListener('click', async () => {
+        if (prepare.disabled) return;
+        prepare.disabled = true;
+        status('get', 'Запрос CSRF');
+        const result = await api('get', { method: 'GET' }, 12000);
+        if (result?.response.status !== 200 || typeof result?.data?.csrf !== 'string' || !result.data.csrf) {
+          status('notice', 'Подготовка формы не подтверждена. POST не выполнялся. Обновите страницу для повтора.');
+          return;
+        }
+        csrf = result.data.csrf;
+        status('get', 'HTTP 200 · CSRF получен');
+        loadChallenge();
+      });
+
+      send.addEventListener('click', async () => {
+        if (sending || attempted || !csrf || !token) return;
+        sending = true;
+        send.disabled = true;
+        try {
+          await navigator.locks.request(attemptKey, async () => {
+            if (localStorage.getItem(attemptKey)) {
+              attempted = true;
+              status('post', 'Повтор заблокирован');
+              status('notice', 'Сначала проверьте результат предыдущей отправки.');
+              return;
+            }
+            if (!csrf || !token) return;
+
+            const submission = crypto.randomUUID();
+            const body = JSON.stringify({
+              name: 'Тест Android', phone: '0000000000', comment: 'Синтетическая проверка посредника',
+              category: 'kitchen', model: 'oliva', consent: true,
+              estimate: { category: 'kitchen', width: '100', height: '100', material: 'basic', installation: true },
+              submission, csrf, turnstileToken: token,
+            });
+            localStorage.setItem(attemptKey, submission);
+            attempted = true;
+            csrf = null;
+            token = null;
+            status('post', 'POST выполняется');
+            status('notice', 'Ожидайте подтверждения. Повтор отключён.');
+            const result = await api('post', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+            }, 30000);
+            if (result?.response.status === 200 && result.data?.ok === true) {
+              status('post', 'HTTP 200 · доставка подтверждена');
+              status('notice', 'Сверьте одну запись в тестовой D1 и одно сообщение в тестовом чате.');
+              return;
+            }
+            const code = result?.data?.code;
+            status('notice', typeof code === 'string' && Object.hasOwn(workerErrors, code)
+              ? workerErrors[code] : 'Доставка не подтверждена. Проверьте тестовый чат и D1.');
+          });
+        } catch {
+          status('notice', attempted ? 'Исход отправки неизвестен. Проверьте тестовый чат и D1.'
+            : 'Не удалось включить защиту от повторов. POST не выполнялся.');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
