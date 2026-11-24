@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6cOoXHUY91p5dlJ8tWJlD2r6aLEaHW8cN8hroB6F5aQ=' https://challenges.cloudflare.com; style-src 'sha256-Dt/NyjGUr2Dq3QHo5Q+UAcCz7H/NTzVPKelMPHNjrm8='; frame-src https://challenges.cloudflare.com; connect-src https://challenges.cloudflare.com https://d5d62f2t9for9lf4du9l.3zvepvee.apigw.yandexcloud.net; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-v9bPPKiBKd4BZuqf752pmMVjOzStFaC+/EoMsDPUem8=' https://challenges.cloudflare.com; style-src 'sha256-Dt/NyjGUr2Dq3QHo5Q+UAcCz7H/NTzVPKelMPHNjrm8='; frame-src https://challenges.cloudflare.com; connect-src https://challenges.cloudflare.com https://d5d62f2t9for9lf4du9l.3zvepvee.apigw.yandexcloud.net; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Тест заявки с Android</title>
@@ -49,7 +49,8 @@
       const endpoint = 'https://d5d62f2t9for9lf4du9l.3zvepvee.apigw.yandexcloud.net/api/application';
       const pageOrigin = 'https://svetlana-hwltim.github.io';
       const pagePath = '/forma-doma-turnstile-test/bridge-mobile-test.html';
-      const attemptKey = 'forma-doma-turnstile-test:bridge-mobile-test:attempt-v1';
+      const lockKey = 'forma-doma-turnstile-test:bridge-mobile-test:attempt-v1';
+      const attemptKey = 'forma-doma-turnstile-test:bridge-mobile-test:after-d77425dd';
       const testSitekey = document.querySelector('main').dataset.sitekey;
       const prepare = document.getElementById('prepare');
       const send = document.getElementById('send');
@@ -195,7 +196,7 @@
         sending = true;
         send.disabled = true;
         try {
-          await navigator.locks.request(attemptKey, async () => {
+          await navigator.locks.request(lockKey, async () => {
             if (localStorage.getItem(attemptKey)) {
               attempted = true;
               status('post', 'Повтор заблокирован');
